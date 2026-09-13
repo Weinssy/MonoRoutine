@@ -69,17 +69,18 @@
 
     /* Solusi Optimasi 3: GPU-accelerated pulseAlarm menggunakan opacity & transform */
     @keyframes pulseAlarm {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.7; transform: scale(0.98); }
+      0%, 100% { opacity: 1; transform: scale(1) translateZ(0); }
+      50% { opacity: 0.7; transform: scale(0.98) translateZ(0); }
     }
     .pulse-alarm {
       background-color: #E60012 !important;
       color: #FFFFFF !important;
       animation: pulseAlarm 0.9s ease-in-out infinite;
       will-change: opacity, transform;
+      transform: translateZ(0);
     }
 
-    /* Solusi Optimasi 2: Hentikan Animasi Infinite saat Tidak Diperlukan & saat Scroll */
+    /* Solusi Optimasi 2: Hentikan Animasi Infinite saat Scroll & Tab Tidak Aktif */
     @media (prefers-reduced-motion: reduce) {
       .pulse-alarm,
       .animate-fade-in,
@@ -90,20 +91,38 @@
     }
     .pulse-alarm.scrolling,
     body.is-scrolling .pulse-alarm,
-    body.is-scrolling .animate-ping {
+    body.is-scrolling .animate-ping,
+    body.is-scrolling .animate-spin,
+    body.is-scrolling [class*="animate-"] {
       animation-play-state: paused !important;
     }
 
-    /* Solusi Optimasi 4: Virtual Scrolling via Content-Visibility pada kartu */
+    /* Solusi Optimasi 6: GPU Acceleration & Hardware-Accelerated Scrolling */
+    main,
+    #main-scroll-container {
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+    }
+
+    #habits-list-container,
+    #tasks-list-container {
+      contain: layout style;
+    }
+
+    /* Solusi Optimasi 4: CSS Containment & Virtual Content-Visibility */
     .habit-card,
     .task-card,
     .streak-card-item {
       content-visibility: auto;
       contain-intrinsic-size: 0 110px;
+      transform: translateZ(0);
+      will-change: transform, opacity;
+      contain: layout style;
     }
     .calendar-day-box {
       content-visibility: auto;
       contain-intrinsic-size: 0 46px;
+      transform: translateZ(0);
     }
     /* Safe Area Spacing for Mobile Devices */
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1rem); }
@@ -227,7 +246,7 @@
   </div>
 
   <!-- MAIN SCROLLABLE CONTAINER -->
-  <main class="flex-1 overflow-y-auto pb-28 max-w-2xl w-full mx-auto p-4 space-y-4">
+  <main id="main-scroll-container" class="flex-1 overflow-y-auto pb-28 max-w-2xl w-full mx-auto p-4 space-y-4">
 
     <!-- OVERVIEW HERO CARD (Clean Monochrome Grid) -->
     <section class="no-print bg-white border border-neutral-200 p-4 sm:p-5">
@@ -977,9 +996,25 @@
   <!-- JAVASCRIPT APPLICATION CORE -->
   <script>
     /* ==========================================================================
-       OPTIMASI PERFORMA: LAZY LUCIDE ICONS & SCROLL-PAUSED ANIMATIONS
+       OPTIMASI PERFORMA KOMPREHENSIF (TARGET 60 FPS SMOOTH SCROLLING)
+       1. Virtual Scrolling (Viewport Slicing & Fast Spacer Layout)
+       2. Pause Animasi Infinite (.pulse-alarm, .animate-ping, .animate-spin) Saat Scroll
+       3. Scoped Lazy Lucide Icons (Hanya elemen dalam viewport)
+       4. Batch DOM Insertions Menggunakan DocumentFragment
+       5. Debounced High-Performance Rendering
        ========================================================================== */
-    // 1. Lazy Load Lucide Icons: Inisialisasi ikon scoped hanya saat diperlukan
+
+    // 1. Debounce Utility
+    function debounce(func, wait = 40) {
+      let timeout;
+      return function(...args) {
+        const context = this;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), wait);
+      };
+    }
+
+    // 2. Scoped Lazy Lucide Icons
     function initLucideIcons(rootEl) {
       if (typeof lucide === 'undefined' || !lucide.createIcons) return;
       try {
@@ -996,23 +1031,35 @@
           });
         }
       } catch (e) {
-        lucide.createIcons();
+        try { lucide.createIcons(); } catch (err) {}
       }
     }
 
-    // 2. Hentikan Animasi Infinite saat Scroll agar FPS tetap 60
+    // 3. Pause Semua Animasi Infinite Saat Scrolling dengan Debounce
     let isScrollingTimer = null;
-    window.addEventListener('scroll', function() {
+    function handleScrollAnimationPause() {
       if (!document.body.classList.contains('is-scrolling')) {
         document.body.classList.add('is-scrolling');
-        document.querySelectorAll('.pulse-alarm').forEach(el => el.classList.add('scrolling'));
+        document.querySelectorAll('.pulse-alarm, .animate-ping, .animate-spin').forEach(el => {
+          el.classList.add('scrolling');
+        });
       }
       clearTimeout(isScrollingTimer);
       isScrollingTimer = setTimeout(function() {
         document.body.classList.remove('is-scrolling');
-        document.querySelectorAll('.pulse-alarm').forEach(el => el.classList.remove('scrolling'));
-      }, 150);
-    }, { passive: true });
+        document.querySelectorAll('.pulse-alarm, .animate-ping, .animate-spin').forEach(el => {
+          el.classList.remove('scrolling');
+        });
+      }, 120);
+    }
+
+    function setupScrollPauseListeners() {
+      const mainEl = document.getElementById('main-scroll-container') || document.querySelector('main');
+      if (mainEl) {
+        mainEl.addEventListener('scroll', handleScrollAnimationPause, { passive: true });
+      }
+      window.addEventListener('scroll', handleScrollAnimationPause, { passive: true });
+    }
 
     document.addEventListener('visibilitychange', function() {
       if (document.hidden) {
@@ -1021,6 +1068,162 @@
         document.body.classList.remove('is-scrolling');
       }
     });
+
+    // 4. Virtual Scroller Class
+    class VirtualScroller {
+      constructor(options) {
+        this.containerSelector = typeof options.container === 'string' ? options.container : null;
+        this.container = typeof options.container === 'string' ? document.querySelector(options.container) : options.container;
+        this.scrollContainer = typeof options.scrollContainer === 'string' ? document.querySelector(options.scrollContainer) : (options.scrollContainer || window);
+        this.items = options.items || [];
+        this.renderItem = options.renderItem;
+        this.itemHeight = options.itemHeight || 110;
+        this.buffer = options.buffer || 4;
+        this.onRendered = options.onRendered || null;
+        this.lastStartIndex = -1;
+        this.lastEndIndex = -1;
+        this.ticking = false;
+        this._attached = false;
+
+        this.onScroll = this.onScroll.bind(this);
+        this.attach();
+      }
+
+      getEffectiveContainer() {
+        if (!this.container && this.containerSelector) {
+          this.container = document.querySelector(this.containerSelector);
+        }
+        return this.container;
+      }
+
+      attach() {
+        if (this.scrollContainer && !this._attached) {
+          this.scrollContainer.addEventListener('scroll', this.onScroll, { passive: true });
+          this._attached = true;
+        }
+      }
+
+      setItems(newItems) {
+        this.items = newItems || [];
+        this.lastStartIndex = -1;
+        this.lastEndIndex = -1;
+        this.render(true);
+      }
+
+      onScroll() {
+        if (!this.ticking) {
+          requestAnimationFrame(() => {
+            this.render(false);
+            this.ticking = false;
+          });
+          this.ticking = true;
+        }
+      }
+
+      render(force = false) {
+        const container = this.getEffectiveContainer();
+        if (!container) return;
+
+        const total = this.items.length;
+        if (total === 0) {
+          container.innerHTML = '';
+          return;
+        }
+
+        // Jika jumlah item <= 12, render batch langsung menggunakan DocumentFragment
+        if (total <= 12) {
+          const fragment = document.createDocumentFragment();
+          const wrapper = document.createElement('div');
+          wrapper.className = 'space-y-2.5';
+          wrapper.innerHTML = this.items.map((item, idx) => this.renderItem(item, idx)).join('');
+          while (wrapper.firstChild) {
+            fragment.appendChild(wrapper.firstChild);
+          }
+          container.innerHTML = '';
+          container.appendChild(fragment);
+          if (this.onRendered) this.onRendered(container);
+          return;
+        }
+
+        const isWindow = this.scrollContainer === window || !this.scrollContainer.getBoundingClientRect;
+        const scrollContainerRect = !isWindow ? this.scrollContainer.getBoundingClientRect() : { top: 0, height: window.innerHeight };
+        const containerRect = container.getBoundingClientRect();
+
+        const distFromTop = containerRect.top - scrollContainerRect.top;
+        const scrolledPx = Math.max(0, -distFromTop);
+        const startIndex = Math.max(0, Math.floor(scrolledPx / this.itemHeight) - this.buffer);
+        const visibleHeight = scrollContainerRect.height || window.innerHeight;
+        const endIndex = Math.min(total, Math.ceil((scrolledPx + visibleHeight) / this.itemHeight) + this.buffer);
+
+        if (!force && startIndex === this.lastStartIndex && endIndex === this.lastEndIndex) {
+          return;
+        }
+
+        this.lastStartIndex = startIndex;
+        this.lastEndIndex = endIndex;
+
+        const topPad = startIndex * this.itemHeight;
+        const bottomPad = (total - endIndex) * this.itemHeight;
+
+        const fragment = document.createDocumentFragment();
+
+        if (topPad > 0) {
+          const topSpacer = document.createElement('div');
+          topSpacer.style.height = `${topPad}px`;
+          topSpacer.setAttribute('aria-hidden', 'true');
+          fragment.appendChild(topSpacer);
+        }
+
+        const itemsWrapper = document.createElement('div');
+        itemsWrapper.className = 'space-y-2.5';
+        const visibleItems = this.items.slice(startIndex, endIndex);
+        itemsWrapper.innerHTML = visibleItems.map((item, idx) => this.renderItem(item, startIndex + idx)).join('');
+        while (itemsWrapper.firstChild) {
+          fragment.appendChild(itemsWrapper.firstChild);
+        }
+
+        if (bottomPad > 0) {
+          const bottomSpacer = document.createElement('div');
+          bottomSpacer.style.height = `${bottomPad}px`;
+          bottomSpacer.setAttribute('aria-hidden', 'true');
+          fragment.appendChild(bottomSpacer);
+        }
+
+        container.innerHTML = '';
+        container.appendChild(fragment);
+
+        if (this.onRendered) {
+          this.onRendered(container);
+        }
+      }
+    }
+
+    let habitsVirtualScroller = null;
+    let tasksVirtualScroller = null;
+
+    function initVirtualScrollers() {
+      const scrollEl = document.getElementById('main-scroll-container') || document.querySelector('main');
+      if (!habitsVirtualScroller) {
+        habitsVirtualScroller = new VirtualScroller({
+          container: '#habits-list-container',
+          scrollContainer: scrollEl,
+          itemHeight: 110,
+          buffer: 4,
+          renderItem: (habit) => renderHabitItemHtml(habit),
+          onRendered: (container) => initLucideIcons(container)
+        });
+      }
+      if (!tasksVirtualScroller) {
+        tasksVirtualScroller = new VirtualScroller({
+          container: '#tasks-list-container',
+          scrollContainer: scrollEl,
+          itemHeight: 130,
+          buffer: 4,
+          renderItem: (task) => renderTaskItemHtml(task),
+          onRendered: (container) => initLucideIcons(container)
+        });
+      }
+    }
 
     /* ==========================================================================
        1. INITIAL STATE & STORAGE MANAGEMENT
@@ -1862,6 +2065,12 @@
         activeBtn.classList.add('text-neutral-900', 'border-neutral-900');
       }
 
+      if (tabId === 'habits' && habitsVirtualScroller) {
+        habitsVirtualScroller.render(true);
+      } else if (tabId === 'tasks' && tasksVirtualScroller) {
+        tasksVirtualScroller.render(true);
+      }
+
       initLucideIcons();
     }
 
@@ -1901,8 +2110,67 @@
       renderHabitsList();
     }
 
+    function renderHabitItemHtml(habit) {
+      const today = getTodayDateString();
+      const todayLogs = completionLogs[today] || [];
+      const isCompleted = todayLogs.includes(habit.id);
+      const freqText = formatFrequencyText(habit);
+      const categoryLabel = habit.category || 'Lainnya';
+
+      return `
+        <div class="habit-card bg-white border ${isCompleted ? 'border-neutral-300 bg-neutral-50/60' : 'border-neutral-200'} p-3.5 transition hover:border-neutral-400 space-y-2.5">
+          <div class="flex items-start justify-between gap-3">
+            <!-- Square Minimalist Checkbox with Lock Validation -->
+            <button ${isCompleted ? 'disabled title="Status telah dikunci tetap untuk hari ini"' : `onclick="requestHabitCompletion('${habit.id}')"`} class="mt-0.5 w-6 h-6 border transition flex items-center justify-center ${isCompleted ? 'bg-neutral-900 border-neutral-900 text-white cursor-not-allowed' : 'border-neutral-400 bg-white hover:border-neutral-900 text-transparent cursor-pointer'}">
+              <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
+            </button>
+
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+                <!-- Category Badge (Uniqlo Style Pill) -->
+                <span class="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 border border-neutral-300 bg-neutral-100 text-neutral-800">
+                  ${escapeHtml(categoryLabel)}
+                </span>
+                
+                <h4 class="text-xs font-bold text-neutral-900 ${isCompleted ? 'line-through text-neutral-400' : ''}">${escapeHtml(habit.name)}</h4>
+                ${isCompleted ? '<span class="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 bg-neutral-900 text-white flex items-center gap-1"><i data-lucide="lock" class="w-2.5 h-2.5 inline"></i> Selesai (Terkunci)</span>' : ''}
+              </div>
+              ${habit.description ? `<p class="text-[11px] text-neutral-500 mt-1 leading-normal">${escapeHtml(habit.description)}</p>` : ''}
+              
+              <!-- Metadata Row -->
+              <div class="flex flex-wrap items-center gap-3 mt-2 text-[10px] uppercase font-bold tracking-wider text-neutral-500">
+                <span class="flex items-center gap-1 text-neutral-800">
+                  <i data-lucide="clock" class="w-3 h-3 text-neutral-700"></i>
+                  ${habit.time} WIB
+                </span>
+                <span class="flex items-center gap-1">
+                  <i data-lucide="calendar" class="w-3 h-3 text-neutral-400"></i>
+                  ${freqText}
+                </span>
+                <span class="flex items-center gap-1 text-[#E60012]">
+                  <i data-lucide="flame" class="w-3 h-3 text-[#E60012]"></i>
+                  ${habit.streak || 0} HARI
+                </span>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="no-print flex items-center space-x-1 shrink-0">
+              <button onclick="openEditModal('${habit.id}')" class="p-1.5 border border-neutral-200 hover:border-neutral-900 text-neutral-600 hover:text-neutral-900 transition" title="Edit Kebiasaan">
+                <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="deleteHabit('${habit.id}')" class="p-1.5 border border-neutral-200 hover:border-[#E60012] text-neutral-400 hover:text-[#E60012] transition" title="Hapus">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderHabitsList() {
       const container = document.getElementById('habits-list-container');
+      if (!container) return;
       const today = getTodayDateString();
       const todayLogs = completionLogs[today] || [];
       const dayOfWeek = new Date().getDay();
@@ -1928,75 +2196,39 @@
       });
 
       if (filtered.length === 0) {
-        container.innerHTML = `
-          <div class="bg-white border border-neutral-200 p-8 text-center space-y-2">
-            <i data-lucide="filter" class="w-7 h-7 text-neutral-400 mx-auto stroke-[1.5]"></i>
-            <p class="text-xs font-black uppercase tracking-wider text-neutral-800">Tidak ada kebiasaan yang cocok</p>
-            <p class="text-[11px] text-neutral-500">Sesuaikan filter kategori di atas atau klik tombol "Tambah" untuk membuat rutinitas baru.</p>
-          </div>
+        const fragment = document.createDocumentFragment();
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'bg-white border border-neutral-200 p-8 text-center space-y-2';
+        emptyDiv.innerHTML = `
+          <i data-lucide="filter" class="w-7 h-7 text-neutral-400 mx-auto stroke-[1.5]"></i>
+          <p class="text-xs font-black uppercase tracking-wider text-neutral-800">Tidak ada kebiasaan yang cocok</p>
+          <p class="text-[11px] text-neutral-500">Sesuaikan filter kategori di atas atau klik tombol "Tambah" untuk membuat rutinitas baru.</p>
         `;
+        fragment.appendChild(emptyDiv);
+        container.innerHTML = '';
+        container.appendChild(fragment);
         initLucideIcons(container);
         return;
       }
 
-      container.innerHTML = filtered.map(habit => {
-        const isCompleted = todayLogs.includes(habit.id);
-        const freqText = formatFrequencyText(habit);
-        const categoryLabel = habit.category || 'Lainnya';
-
-        return `
-          <div class="habit-card bg-white border ${isCompleted ? 'border-neutral-300 bg-neutral-50/60' : 'border-neutral-200'} p-3.5 transition hover:border-neutral-400 space-y-2.5">
-            <div class="flex items-start justify-between gap-3">
-              <!-- Square Minimalist Checkbox with Lock Validation -->
-              <button ${isCompleted ? 'disabled title="Status telah dikunci tetap untuk hari ini"' : `onclick="requestHabitCompletion('${habit.id}')"`} class="mt-0.5 w-6 h-6 border transition flex items-center justify-center ${isCompleted ? 'bg-neutral-900 border-neutral-900 text-white cursor-not-allowed' : 'border-neutral-400 bg-white hover:border-neutral-900 text-transparent cursor-pointer'}">
-                <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
-              </button>
-
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center space-x-2 flex-wrap gap-y-1">
-                  <!-- Category Badge (Uniqlo Style Pill) -->
-                  <span class="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 border border-neutral-300 bg-neutral-100 text-neutral-800">
-                    ${escapeHtml(categoryLabel)}
-                  </span>
-                  
-                  <h4 class="text-xs font-bold text-neutral-900 ${isCompleted ? 'line-through text-neutral-400' : ''}">${escapeHtml(habit.name)}</h4>
-                  ${isCompleted ? '<span class="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 bg-neutral-900 text-white flex items-center gap-1"><i data-lucide="lock" class="w-2.5 h-2.5 inline"></i> Selesai (Terkunci)</span>' : ''}
-                </div>
-                ${habit.description ? `<p class="text-[11px] text-neutral-500 mt-1 leading-normal">${escapeHtml(habit.description)}</p>` : ''}
-                
-                <!-- Metadata Row -->
-                <div class="flex flex-wrap items-center gap-3 mt-2 text-[10px] uppercase font-bold tracking-wider text-neutral-500">
-                  <span class="flex items-center gap-1 text-neutral-800">
-                    <i data-lucide="clock" class="w-3 h-3 text-neutral-700"></i>
-                    ${habit.time} WIB
-                  </span>
-                  <span class="flex items-center gap-1">
-                    <i data-lucide="calendar" class="w-3 h-3 text-neutral-400"></i>
-                    ${freqText}
-                  </span>
-                  <span class="flex items-center gap-1 text-[#E60012]">
-                    <i data-lucide="flame" class="w-3 h-3 text-[#E60012]"></i>
-                    ${habit.streak || 0} HARI
-                  </span>
-                </div>
-              </div>
-
-              <!-- Actions -->
-              <div class="no-print flex items-center space-x-1 shrink-0">
-                <button onclick="openEditModal('${habit.id}')" class="p-1.5 border border-neutral-200 hover:border-neutral-900 text-neutral-600 hover:text-neutral-900 transition" title="Edit Kebiasaan">
-                  <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
-                </button>
-                <button onclick="deleteHabit('${habit.id}')" class="p-1.5 border border-neutral-200 hover:border-[#E60012] text-neutral-400 hover:text-[#E60012] transition" title="Hapus">
-                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                </button>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
-
-      initLucideIcons(container);
+      initVirtualScrollers();
+      if (habitsVirtualScroller) {
+        habitsVirtualScroller.setItems(filtered);
+      } else {
+        const fragment = document.createDocumentFragment();
+        const wrapper = document.createElement('div');
+        wrapper.className = 'space-y-2.5';
+        wrapper.innerHTML = filtered.map(habit => renderHabitItemHtml(habit)).join('');
+        while (wrapper.firstChild) {
+          fragment.appendChild(wrapper.firstChild);
+        }
+        container.innerHTML = '';
+        container.appendChild(fragment);
+        initLucideIcons(container);
+      }
     }
+
+    const debouncedRenderHabitsList = debounce(renderHabitsList, 40);
 
     function formatFrequencyText(habit) {
       if (habit.frequency === 'daily') return 'Setiap Hari';
@@ -2257,6 +2489,94 @@
       renderTasks();
     }
 
+    function renderTaskItemHtml(task, now = Date.now()) {
+      const deadlineDate = new Date(task.deadline);
+      const diffMs = deadlineDate.getTime() - now;
+      const diffHours = diffMs / 3600000;
+
+      let badgeHtml = '';
+      let isPastDue = false;
+      let isApproachingUrgent = false;
+
+      if (task.completed) {
+        badgeHtml = `<span class="bg-neutral-900 text-white text-[9px] font-black uppercase tracking-wider px-2 py-0.5">Selesai</span>`;
+      } else if (diffHours < 0) {
+        isPastDue = true;
+        badgeHtml = `<span class="bg-[#E60012] text-white text-[9px] font-black uppercase tracking-wider px-2 py-0.5 flex items-center gap-1"><i data-lucide="alert-circle" class="w-3 h-3"></i> Lewat Deadline</span>`;
+      } else if (diffHours <= 24) {
+        isApproachingUrgent = true;
+        badgeHtml = `<span class="bg-neutral-900 text-white text-[9px] font-black uppercase tracking-widest px-2 py-0.5 flex items-center gap-1 border border-neutral-900"><i data-lucide="alert-triangle" class="w-3 h-3 text-[#E60012]"></i> &lt; 24 Jam (H-1)</span>`;
+      } else if (diffHours <= 48) {
+        badgeHtml = `<span class="border border-neutral-900 bg-neutral-100 text-neutral-900 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> H-2 (48 Jam)</span>`;
+      } else {
+        badgeHtml = `<span class="border border-neutral-300 bg-neutral-50 text-neutral-600 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5">${Math.ceil(diffHours / 24)} Hari Lagi</span>`;
+      }
+
+      // Priority badge style
+      let priorityBadge = '';
+      if (task.priority === 'Mendesak') {
+        priorityBadge = `<span class="border border-[#E60012] text-[#E60012] bg-[#E60012]/5 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5">Mendesak</span>`;
+      } else if (task.priority === 'Normal') {
+        priorityBadge = `<span class="border border-neutral-300 text-neutral-700 bg-neutral-50 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5">Normal</span>`;
+      } else {
+        priorityBadge = `<span class="border border-neutral-200 text-neutral-500 bg-neutral-50 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5">Rendah</span>`;
+      }
+
+      // Deadline formatted date string
+      const formattedDeadline = deadlineDate.toLocaleDateString('id-ID', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      }) + ' • ' + deadlineDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+
+      const borderClass = isApproachingUrgent
+        ? 'border-2 border-neutral-900 bg-neutral-50/70'
+        : isPastDue
+        ? 'border border-[#E60012]/60 bg-white'
+        : task.completed
+        ? 'border border-neutral-200 bg-neutral-50/40 opacity-75'
+        : 'border border-neutral-200 bg-white';
+
+      return `
+        <div class="task-card ${borderClass} p-3.5 transition hover:border-neutral-400 space-y-2.5">
+          <div class="flex items-start justify-between gap-3">
+            <!-- Checkbox (Toggles completion to localStorage immediately) -->
+            <button onclick="toggleTaskCompletion('${task.id}')" class="mt-0.5 w-6 h-6 border transition flex items-center justify-center shrink-0 ${task.completed ? 'bg-neutral-900 border-neutral-900 text-white' : 'border-neutral-400 bg-white hover:border-neutral-900 text-transparent'}" title="Tandai Status Tugas">
+              <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
+            </button>
+
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+                ${priorityBadge}
+                ${badgeHtml}
+              </div>
+
+              <h4 class="text-xs font-bold text-neutral-900 mt-1 ${task.completed ? 'line-through text-neutral-400' : ''}">
+                ${escapeHtml(task.title)}
+              </h4>
+
+              ${task.notes ? `<p class="text-[11px] text-neutral-600 mt-1 leading-normal font-normal">${escapeHtml(task.notes)}</p>` : ''}
+
+              <div class="flex flex-wrap items-center gap-3 mt-2 text-[10px] uppercase font-bold tracking-wider text-neutral-500">
+                <span class="flex items-center gap-1 ${isApproachingUrgent || isPastDue ? 'text-neutral-900 font-black' : 'text-neutral-700'}">
+                  <i data-lucide="calendar" class="w-3 h-3"></i>
+                  ${formattedDeadline}
+                </span>
+              </div>
+            </div>
+
+            <!-- Delete Action -->
+            <div class="no-print shrink-0">
+              <button onclick="deleteTask('${task.id}')" class="p-1.5 border border-neutral-200 hover:border-[#E60012] text-neutral-400 hover:text-[#E60012] transition" title="Hapus Tugas">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderTasks() {
       const container = document.getElementById('tasks-list-container');
       if (!container) return;
@@ -2294,107 +2614,39 @@
       });
 
       if (filtered.length === 0) {
-        container.innerHTML = `
-          <div class="bg-white border border-neutral-200 p-8 text-center space-y-2">
-            <i data-lucide="check-square" class="w-7 h-7 text-neutral-400 mx-auto stroke-[1.5]"></i>
-            <p class="text-xs font-black uppercase tracking-wider text-neutral-800">Tidak ada tugas dalam kategori ini</p>
-            <p class="text-[11px] text-neutral-500">Gunakan form di atas untuk menambahkan tugas dan deadline baru.</p>
-          </div>
+        const fragment = document.createDocumentFragment();
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'bg-white border border-neutral-200 p-8 text-center space-y-2';
+        emptyDiv.innerHTML = `
+          <i data-lucide="check-square" class="w-7 h-7 text-neutral-400 mx-auto stroke-[1.5]"></i>
+          <p class="text-xs font-black uppercase tracking-wider text-neutral-800">Tidak ada tugas dalam kategori ini</p>
+          <p class="text-[11px] text-neutral-500">Gunakan form di atas untuk menambahkan tugas dan deadline baru.</p>
         `;
+        fragment.appendChild(emptyDiv);
+        container.innerHTML = '';
+        container.appendChild(fragment);
         initLucideIcons(container);
         return;
       }
 
-      container.innerHTML = filtered.map(task => {
-        const deadlineDate = new Date(task.deadline);
-        const diffMs = deadlineDate.getTime() - now;
-        const diffHours = diffMs / 3600000;
-
-        let badgeHtml = '';
-        let isPastDue = false;
-        let isApproachingUrgent = false;
-
-        if (task.completed) {
-          badgeHtml = `<span class="bg-neutral-900 text-white text-[9px] font-black uppercase tracking-wider px-2 py-0.5">Selesai</span>`;
-        } else if (diffHours < 0) {
-          isPastDue = true;
-          badgeHtml = `<span class="bg-[#E60012] text-white text-[9px] font-black uppercase tracking-wider px-2 py-0.5 flex items-center gap-1"><i data-lucide="alert-circle" class="w-3 h-3"></i> Lewat Deadline</span>`;
-        } else if (diffHours <= 24) {
-          isApproachingUrgent = true;
-          badgeHtml = `<span class="bg-neutral-900 text-white text-[9px] font-black uppercase tracking-widest px-2 py-0.5 flex items-center gap-1 border border-neutral-900"><i data-lucide="alert-triangle" class="w-3 h-3 text-[#E60012]"></i> &lt; 24 Jam (H-1)</span>`;
-        } else if (diffHours <= 48) {
-          badgeHtml = `<span class="border border-neutral-900 bg-neutral-100 text-neutral-900 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> H-2 (48 Jam)</span>`;
-        } else {
-          badgeHtml = `<span class="border border-neutral-300 bg-neutral-50 text-neutral-600 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5">${Math.ceil(diffHours / 24)} Hari Lagi</span>`;
+      initVirtualScrollers();
+      if (tasksVirtualScroller) {
+        tasksVirtualScroller.setItems(filtered);
+      } else {
+        const fragment = document.createDocumentFragment();
+        const wrapper = document.createElement('div');
+        wrapper.className = 'space-y-2.5';
+        wrapper.innerHTML = filtered.map(task => renderTaskItemHtml(task, now)).join('');
+        while (wrapper.firstChild) {
+          fragment.appendChild(wrapper.firstChild);
         }
-
-        // Priority badge style
-        let priorityBadge = '';
-        if (task.priority === 'Mendesak') {
-          priorityBadge = `<span class="border border-[#E60012] text-[#E60012] bg-[#E60012]/5 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5">Mendesak</span>`;
-        } else if (task.priority === 'Normal') {
-          priorityBadge = `<span class="border border-neutral-300 text-neutral-700 bg-neutral-50 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5">Normal</span>`;
-        } else {
-          priorityBadge = `<span class="border border-neutral-200 text-neutral-500 bg-neutral-50 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5">Rendah</span>`;
-        }
-
-        // Deadline formatted date string
-        const formattedDeadline = deadlineDate.toLocaleDateString('id-ID', {
-          weekday: 'short',
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric'
-        }) + ' • ' + deadlineDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-
-        const borderClass = isApproachingUrgent
-          ? 'border-2 border-neutral-900 bg-neutral-50/70'
-          : isPastDue
-          ? 'border border-[#E60012]/60 bg-white'
-          : task.completed
-          ? 'border border-neutral-200 bg-neutral-50/40 opacity-75'
-          : 'border border-neutral-200 bg-white';
-
-        return `
-          <div class="task-card ${borderClass} p-3.5 transition hover:border-neutral-400 space-y-2.5">
-            <div class="flex items-start justify-between gap-3">
-              <!-- Checkbox (Toggles completion to localStorage immediately) -->
-              <button onclick="toggleTaskCompletion('${task.id}')" class="mt-0.5 w-6 h-6 border transition flex items-center justify-center shrink-0 ${task.completed ? 'bg-neutral-900 border-neutral-900 text-white' : 'border-neutral-400 bg-white hover:border-neutral-900 text-transparent'}" title="Tandai Status Tugas">
-                <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
-              </button>
-
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center space-x-2 flex-wrap gap-y-1">
-                  ${priorityBadge}
-                  ${badgeHtml}
-                </div>
-
-                <h4 class="text-xs font-bold text-neutral-900 mt-1 ${task.completed ? 'line-through text-neutral-400' : ''}">
-                  ${escapeHtml(task.title)}
-                </h4>
-
-                ${task.notes ? `<p class="text-[11px] text-neutral-600 mt-1 leading-normal font-normal">${escapeHtml(task.notes)}</p>` : ''}
-
-                <div class="flex flex-wrap items-center gap-3 mt-2 text-[10px] uppercase font-bold tracking-wider text-neutral-500">
-                  <span class="flex items-center gap-1 ${isApproachingUrgent || isPastDue ? 'text-neutral-900 font-black' : 'text-neutral-700'}">
-                    <i data-lucide="calendar" class="w-3 h-3"></i>
-                    ${formattedDeadline}
-                  </span>
-                </div>
-              </div>
-
-              <!-- Delete Action -->
-              <div class="no-print shrink-0">
-                <button onclick="deleteTask('${task.id}')" class="p-1.5 border border-neutral-200 hover:border-[#E60012] text-neutral-400 hover:text-[#E60012] transition" title="Hapus Tugas">
-                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                </button>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
-
-      initLucideIcons(container);
+        container.innerHTML = '';
+        container.appendChild(fragment);
+        initLucideIcons(container);
+      }
     }
+
+    const debouncedRenderTasks = debounce(renderTasks, 40);
 
     /* Background Interval Checker for H-2 (48h) and H-1 (24h) Deadlines */
     function checkTaskDeadlines() {
@@ -3024,6 +3276,8 @@
     window.addEventListener('DOMContentLoaded', () => {
       loadAppData();
       setupDynamicPWA();
+      setupScrollPauseListeners();
+      initVirtualScrollers();
 
       const volSlider = document.getElementById('volume-slider');
       if (volSlider) {

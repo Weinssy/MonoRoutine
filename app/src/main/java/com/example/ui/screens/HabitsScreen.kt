@@ -233,14 +233,22 @@ fun HabitsScreen(
                 }
             }
         } else {
-            items(habits, key = { it.id }) { habit ->
+            items(
+                items = habits,
+                key = { it.id },
+                contentType = { "habit_card" }
+            ) { habit ->
                 val isCompleted = todayCompletedIds.contains(habit.id)
+                val currentOnToggleCompletion by androidx.compose.runtime.rememberUpdatedState(onToggleCompletion)
+                val currentOnToggleAlarm by androidx.compose.runtime.rememberUpdatedState(onToggleAlarm)
+                val currentOnTriggerAlarm by androidx.compose.runtime.rememberUpdatedState(onTriggerAlarm)
+
                 HabitCardItem(
                     habit = habit,
                     isCompleted = isCompleted,
-                    onToggleCompletion = { onToggleCompletion(habit) },
-                    onToggleAlarm = { onToggleAlarm(habit) },
-                    onTriggerAlarm = { onTriggerAlarm(habit) },
+                    onToggleCompletion = remember(habit.id) { { currentOnToggleCompletion(habit) } },
+                    onToggleAlarm = remember(habit.id) { { currentOnToggleAlarm(habit) } },
+                    onTriggerAlarm = remember(habit.id) { { currentOnTriggerAlarm(habit) } },
                     onEdit = { habitToEdit = habit },
                     onDelete = { habitToDelete = habit }
                 )

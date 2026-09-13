@@ -234,11 +234,18 @@ fun TasksScreen(
                 }
             }
         } else {
-            items(tasks, key = { it.id }) { task ->
+            items(
+                items = tasks,
+                key = { it.id },
+                contentType = { "task_card" }
+            ) { task ->
+                val currentOnToggle by androidx.compose.runtime.rememberUpdatedState(onToggleCompletion)
+                val currentOnDelete by androidx.compose.runtime.rememberUpdatedState(onDeleteTask)
+
                 TaskCardItem(
                     task = task,
-                    onToggle = { onToggleCompletion(task) },
-                    onDelete = { onDeleteTask(task) }
+                    onToggle = remember(task.id) { { currentOnToggle(task) } },
+                    onDelete = remember(task.id) { { currentOnDelete(task) } }
                 )
             }
         }
@@ -333,6 +340,15 @@ private fun TaskFilterRow(
     }
 }
 
+private data class CalculatedTaskUrgency(
+    val urgencyTag: String,
+    val tagBg: Color,
+    val tagText: Color,
+    val isOverdue: Boolean,
+    val isH1: Boolean,
+    val remainingText: String
+)
+
 @Composable
 private fun TaskCardItem(
     task: TaskItem,
@@ -340,44 +356,49 @@ private fun TaskCardItem(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val now = System.currentTimeMillis()
-    val diffMs = task.deadline - now
-    val isOverdue = diffMs < 0 && !task.isCompleted
-    val isH1 = diffMs in 0..(24 * 3600 * 1000L) && !task.isCompleted
-    val isH2 = diffMs in (24 * 3600 * 1000L)..(48 * 3600 * 1000L) && !task.isCompleted
+    // Memoize time calculations based on task properties to prevent CPU churn during fast scrolling
+    val (urgencyTag, tagBg, tagText, isOverdue, isH1, remainingText) = remember(task.deadline, task.isCompleted) {
+        val now = System.currentTimeMillis()
+        val diffMs = task.deadline - now
+        val overdue = diffMs < 0 && !task.isCompleted
+        val h1 = diffMs in 0..(24 * 3600 * 1000L) && !task.isCompleted
+        val isH2 = diffMs in (24 * 3600 * 1000L)..(48 * 3600 * 1000L) && !task.isCompleted
 
-    val urgencyTag = when {
-        task.isCompleted -> "SELESAI"
-        isOverdue -> "LEWAT TENGGAT"
-        isH1 -> "H-1 / < 24 JAM"
-        isH2 -> "H-2 / < 48 JAM"
-        else -> "AMAN"
-    }
+        val uTag = when {
+            task.isCompleted -> "SELESAI"
+            overdue -> "LEWAT TENGGAT"
+            h1 -> "H-1 / < 24 JAM"
+            isH2 -> "H-2 / < 48 JAM"
+            else -> "AMAN"
+        }
 
-    val (tagBg, tagText) = when {
-        task.isCompleted -> Pair(Color(0xFFF0F0F0), MonoGray)
-        isOverdue -> Pair(Color(0xFFFFF1F1), BrandRed)
-        isH1 -> Pair(Color(0xFFFFFBEB), UrgentAmber)
-        isH2 -> Pair(Color(0xFFF4F4F5), MonoDark)
-        else -> Pair(Color(0xFFF7F7F7), MonoGray)
+        val (bg, txt) = when {
+            task.isCompleted -> Pair(Color(0xFFF0F0F0), MonoGray)
+            overdue -> Pair(Color(0xFFFFF1F1), BrandRed)
+            h1 -> Pair(Color(0xFFFFFBEB), UrgentAmber)
+            isH2 -> Pair(Color(0xFFF4F4F5), MonoDark)
+            else -> Pair(Color(0xFFF7F7F7), MonoGray)
+        }
+
+        val remText = when {
+            task.isCompleted -> "Tugas selesai"
+            overdue -> {
+                val hoursOver = (-diffMs / (3600 * 1000)).toInt()
+                if (hoursOver >= 24) "Terlambat ${hoursOver / 24} hari" else "Terlambat $hoursOver jam"
+            }
+            else -> {
+                val hoursLeft = (diffMs / (3600 * 1000)).toInt()
+                val minsLeft = ((diffMs % (3600 * 1000)) / (60 * 1000)).toInt()
+                if (hoursLeft >= 24) "Sisa ${hoursLeft / 24} hr ${hoursLeft % 24} jam" else "Sisa $hoursLeft jam $minsLeft mnt"
+            }
+        }
+
+        CalculatedTaskUrgency(uTag, bg, txt, overdue, h1, remText)
     }
 
     val deadlineFormatted = remember(task.deadline) {
         val sdf = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale("id", "ID"))
         sdf.format(Date(task.deadline))
-    }
-
-    val remainingText = when {
-        task.isCompleted -> "Tugas selesai"
-        isOverdue -> {
-            val hoursOver = (-diffMs / (3600 * 1000)).toInt()
-            if (hoursOver >= 24) "Terlambat ${hoursOver / 24} hari" else "Terlambat $hoursOver jam"
-        }
-        else -> {
-            val hoursLeft = (diffMs / (3600 * 1000)).toInt()
-            val minsLeft = ((diffMs % (3600 * 1000)) / (60 * 1000)).toInt()
-            if (hoursLeft >= 24) "Sisa ${hoursLeft / 24} hr ${hoursLeft % 24} jam" else "Sisa $hoursLeft jam $minsLeft mnt"
-        }
     }
 
     Surface(
