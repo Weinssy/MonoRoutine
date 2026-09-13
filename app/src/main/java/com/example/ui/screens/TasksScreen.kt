@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material3.Button
@@ -45,7 +47,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -76,6 +80,8 @@ fun TasksScreen(
     modifier: Modifier = Modifier
 ) {
     var showForm by remember { mutableStateOf(false) }
+    var isCompletedExpanded by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
 
     val now = System.currentTimeMillis()
     val h24 = now + 24 * 3600 * 1000L
@@ -83,6 +89,10 @@ fun TasksScreen(
     val pendingCount = allTasks.count { !it.isCompleted }
     val urgentCount = allTasks.count { !it.isCompleted && it.deadline in (now..h24) }
     val completedCount = allTasks.count { it.isCompleted }
+
+    // Separate active and completed tasks
+    val activeTasks = remember(tasks) { tasks.filter { !it.isCompleted } }
+    val completedTasks = remember(tasks) { tasks.filter { it.isCompleted } }
 
     LazyColumn(
         modifier = modifier
@@ -182,8 +192,8 @@ fun TasksScreen(
         }
 
         // Inline Form
-        item {
-            AnimatedVisibility(visible = showForm) {
+        if (showForm) {
+            item {
                 TaskInlineForm(
                     onCancel = { showForm = false },
                     onSave = { title, deadline, priority, notes ->
@@ -203,7 +213,7 @@ fun TasksScreen(
         }
 
         // Task Items
-        if (tasks.isEmpty()) {
+        if (activeTasks.isEmpty() && completedTasks.isEmpty()) {
             item {
                 Surface(
                     color = MonoSurface,
@@ -234,8 +244,9 @@ fun TasksScreen(
                 }
             }
         } else {
+            // 1. Active / Pending Tasks
             items(
-                items = tasks,
+                items = activeTasks,
                 key = { it.id },
                 contentType = { "task_card" }
             ) { task ->
@@ -244,9 +255,98 @@ fun TasksScreen(
 
                 TaskCardItem(
                     task = task,
-                    onToggle = remember(task.id) { { currentOnToggle(task) } },
+                    onToggle = remember(task.id) {
+                        {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            currentOnToggle(task)
+                        }
+                    },
                     onDelete = remember(task.id) { { currentOnDelete(task) } }
                 )
+            }
+
+            // 2. Collapsible Completed Tasks Section at the bottom
+            if (completedTasks.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = Color(0xFFFAFAFA),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MonoBorder),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                isCompletedExpanded = !isCompletedExpanded
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(MonoGray)
+                                )
+                                Text(
+                                    text = "TUGAS SELESAI (${completedTasks.size})",
+                                    color = MonoDark,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = if (isCompletedExpanded) "SEMBUNYIKAN" else "TAMPILKAN",
+                                    color = MonoGray,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Icon(
+                                    imageVector = if (isCompletedExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (isCompletedExpanded) "Sembunyikan" else "Tampilkan",
+                                    tint = MonoDark,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (isCompletedExpanded) {
+                    items(
+                        items = completedTasks,
+                        key = { it.id },
+                        contentType = { "task_card_completed" }
+                    ) { task ->
+                        val currentOnToggle by androidx.compose.runtime.rememberUpdatedState(onToggleCompletion)
+                        val currentOnDelete by androidx.compose.runtime.rememberUpdatedState(onDeleteTask)
+
+                        TaskCardItem(
+                            task = task,
+                            onToggle = remember(task.id) {
+                                {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    currentOnToggle(task)
+                                }
+                            },
+                            onDelete = remember(task.id) { { currentOnDelete(task) } }
+                        )
+                    }
+                }
             }
         }
 

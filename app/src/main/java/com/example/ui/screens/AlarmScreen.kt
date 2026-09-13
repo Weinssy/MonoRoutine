@@ -345,7 +345,11 @@ fun AlarmScreen(
                 )
             }
         } else {
-            items(habits, key = { it.id }) { habit ->
+            items(
+                items = habits,
+                key = { it.id },
+                contentType = { "alarm_habit_card" }
+            ) { habit ->
                 Surface(
                     color = MonoSurface,
                     border = androidx.compose.foundation.BorderStroke(1.dp, MonoBorder),

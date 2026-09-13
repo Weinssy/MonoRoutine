@@ -312,7 +312,11 @@ fun CalendarScreen(
                 )
             }
         } else {
-            items(habits, key = { it.id }) { habit ->
+            items(
+                items = habits,
+                key = { it.id },
+                contentType = { "streak_card" }
+            ) { habit ->
                 StreakCardItem(habit = habit)
             }
         }

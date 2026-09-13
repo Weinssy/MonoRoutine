@@ -57,6 +57,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -96,6 +98,7 @@ fun HabitsScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var habitToEdit by remember { mutableStateOf<Habit?>(null) }
     var habitToDelete by remember { mutableStateOf<Habit?>(null) }
+    val haptic = LocalHapticFeedback.current
 
     val todayCompletedIds = remember(completions, todayStr) {
         completions.filter { it.date == todayStr }.map { it.habitId }.toSet()
@@ -246,7 +249,12 @@ fun HabitsScreen(
                 HabitCardItem(
                     habit = habit,
                     isCompleted = isCompleted,
-                    onToggleCompletion = remember(habit.id) { { currentOnToggleCompletion(habit) } },
+                    onToggleCompletion = remember(habit.id) {
+                        {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            currentOnToggleCompletion(habit)
+                        }
+                    },
                     onToggleAlarm = remember(habit.id) { { currentOnToggleAlarm(habit) } },
                     onTriggerAlarm = remember(habit.id) { { currentOnTriggerAlarm(habit) } },
                     onEdit = { habitToEdit = habit },

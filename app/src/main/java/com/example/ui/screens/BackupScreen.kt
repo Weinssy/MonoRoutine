@@ -4,6 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TableChart
@@ -58,6 +63,8 @@ import com.example.ui.theme.MonoBorder
 import com.example.ui.theme.MonoDark
 import com.example.ui.theme.MonoGray
 import com.example.ui.theme.MonoSurface
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -77,6 +84,47 @@ fun BackupScreen(
     var showImportDialog by remember { mutableStateOf(false) }
     var importInputText by remember { mutableStateOf("") }
     var actionNotice by remember { mutableStateOf<String?>(null) }
+    var pendingExportContent by remember { mutableStateOf("") }
+
+    // SAF Create Document launcher for file export
+    val createDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null && pendingExportContent.isNotBlank()) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(pendingExportContent.toByteArray(Charsets.UTF_8))
+                }
+                actionNotice = "Berkas berhasil disimpan!"
+            } catch (e: Exception) {
+                actionNotice = "Gagal menyimpan berkas: ${e.message}"
+            }
+        }
+    }
+
+    // SAF Open Document launcher for file import
+    val openDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val content = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).readText()
+                }
+                if (!content.isNullOrBlank()) {
+                    onImportJson(content) { success ->
+                        if (success) {
+                            actionNotice = "Data berhasil dipulihkan dari berkas!"
+                        } else {
+                            actionNotice = "Format berkas cadangan tidak valid."
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                actionNotice = "Gagal membaca berkas: ${e.message}"
+            }
+        }
+    }
 
     fun shareText(text: String, title: String) {
         val intent = Intent(Intent.ACTION_SEND).apply {
@@ -92,6 +140,11 @@ fun BackupScreen(
         val clip = ClipData.newPlainText(label, text)
         clipboard.setPrimaryClip(clip)
         actionNotice = "$label telah disalin ke papan klip!"
+    }
+
+    fun saveFileViaSaf(content: String, defaultFileName: String, mimeType: String = "application/json") {
+        pendingExportContent = content
+        createDocLauncher.launch(defaultFileName)
     }
 
     LazyColumn(
@@ -184,6 +237,11 @@ fun BackupScreen(
                         icon = Icons.Default.DataObject,
                         title = "CADANGAN JSON LENGKAP",
                         subtitle = "Menyimpan seluruh data rutinitas, streak, dan tugas",
+                        onSave = {
+                            val json = onExportJson()
+                            val dateStr = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                            saveFileViaSaf(json, "MonoRoutine_Backup_$dateStr.json", "application/json")
+                        },
                         onShare = {
                             val json = onExportJson()
                             shareText(json, "MonoRoutine-Backup.json")
@@ -199,6 +257,11 @@ fun BackupScreen(
                         icon = Icons.Default.TableChart,
                         title = "TABEL CSV",
                         subtitle = "Dapat dibuka di Microsoft Excel atau Google Sheets",
+                        onSave = {
+                            val csv = buildCsv(habits, tasks)
+                            val dateStr = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                            saveFileViaSaf(csv, "MonoRoutine_Report_$dateStr.csv", "text/csv")
+                        },
                         onShare = {
                             val csv = buildCsv(habits, tasks)
                             shareText(csv, "MonoRoutine-Report.csv")
@@ -214,6 +277,11 @@ fun BackupScreen(
                         icon = Icons.Default.Description,
                         title = "RINGKASAN TEKS",
                         subtitle = "Rangkuman daftar rutinitas & deadline yang rapi dibaca",
+                        onSave = {
+                            val txt = buildSummaryText(habits, tasks)
+                            val dateStr = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                            saveFileViaSaf(txt, "MonoRoutine_Summary_$dateStr.txt", "text/plain")
+                        },
                         onShare = {
                             val txt = buildSummaryText(habits, tasks)
                             shareText(txt, "Ringkasan MonoRoutine.txt")
@@ -237,7 +305,7 @@ fun BackupScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
                         text = "PULIHKAN DATA (RESTORE)",
@@ -247,28 +315,54 @@ fun BackupScreen(
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "Tempel teks cadangan JSON yang telah diekspor untuk memulihkan data.",
+                        text = "Pulihkan data dari berkas JSON (.json) atau tempel teks langsung.",
                         color = MonoGray,
                         fontSize = 11.sp
                     )
 
-                    Button(
-                        onClick = { showImportDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = MonoBlack),
-                        shape = RoundedCornerShape(3.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Upload,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.size(6.dp))
-                        Text(
-                            text = "TEMPEL & PULIHKAN DATA JSON",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 11.sp
-                        )
+                        Button(
+                            onClick = { openDocLauncher.launch(arrayOf("application/json", "*/*")) },
+                            colors = ButtonDefaults.buttonColors(containerColor = MonoBlack),
+                            shape = RoundedCornerShape(3.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.size(6.dp))
+                            Text(
+                                text = "PILIH BERKAS",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { showImportDialog = true },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MonoBorder),
+                            shape = RoundedCornerShape(3.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Upload,
+                                contentDescription = null,
+                                tint = MonoBlack,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.size(6.dp))
+                            Text(
+                                text = "TEMPEL TEKS",
+                                color = MonoBlack,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
                 }
             }
@@ -443,6 +537,7 @@ private fun ExportOptionRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
+    onSave: (() -> Unit)? = null,
     onShare: () -> Unit,
     onCopy: () -> Unit
 ) {
@@ -480,29 +575,49 @@ private fun ExportOptionRow(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (onSave != null) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(MonoBlack)
+                            .clickable { onSave() }
+                            .padding(horizontal = 7.dp, vertical = 5.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(Icons.Default.FileDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
+                            Text("SIMPAN", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        }
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(2.dp))
                         .border(1.dp, MonoBorder)
                         .background(Color.White)
                         .clickable { onCopy() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .padding(horizontal = 7.dp, vertical = 5.dp)
                 ) {
                     Text("SALIN", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = MonoBlack)
                 }
+
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(2.dp))
-                        .background(MonoBlack)
+                        .border(1.dp, MonoBorder)
+                        .background(Color.White)
                         .clickable { onShare() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .padding(horizontal = 7.dp, vertical = 5.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
-                        Text("BAGIKAN", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        Icon(Icons.Default.Share, contentDescription = null, tint = MonoBlack, modifier = Modifier.size(10.dp))
+                        Text("BAGIKAN", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = MonoBlack)
                     }
                 }
             }

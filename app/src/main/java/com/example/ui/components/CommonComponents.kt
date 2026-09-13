@@ -197,18 +197,13 @@ fun EmergencyAlarmBanner(
     onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    AnimatedVisibility(
-        visible = activeHabit != null,
-        enter = slideInVertically() + fadeIn(),
-        exit = slideOutVertically() + fadeOut()
-    ) {
-        if (activeHabit != null) {
-            Surface(
-                color = MonoBlack,
-                modifier = modifier
-                    .fillMaxWidth()
-                    .border(2.dp, BrandRed)
-            ) {
+    if (activeHabit != null) {
+        Surface(
+            color = MonoBlack,
+            modifier = modifier
+                .fillMaxWidth()
+                .border(2.dp, BrandRed)
+        ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -279,7 +274,6 @@ fun EmergencyAlarmBanner(
                     }
                 }
             }
-        }
     }
 }
 

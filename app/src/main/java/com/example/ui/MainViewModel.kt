@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.PowerManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.alarm.RoutineAlarmScheduler
 import com.example.data.AppDatabase
 import com.example.data.Habit
 import com.example.data.HabitCompletion
@@ -190,12 +191,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateHabit(habit: Habit) {
         viewModelScope.launch {
             repository.updateHabit(habit)
+            RoutineAlarmScheduler.scheduleHabitAlarm(getApplication(), habit)
             showToast("Rutinitas diperbarui")
         }
     }
 
     fun deleteHabit(habit: Habit) {
         viewModelScope.launch {
+            RoutineAlarmScheduler.cancelHabitAlarm(getApplication(), habit.id)
             repository.deleteHabit(habit)
             showToast("Rutinitas dihapus")
         }
@@ -205,6 +208,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val updated = habit.copy(alarmEnabled = !habit.alarmEnabled)
             repository.updateHabit(updated)
+            RoutineAlarmScheduler.scheduleHabitAlarm(getApplication(), updated)
         }
     }
 
